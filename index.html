@@ -206,8 +206,26 @@
                 const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
                 if (gl) {
                     const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
-                    fingerprint.webgl_vendor = debugInfo ? gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL) : '';
-                    fingerprint.webgl_renderer = debugInfo ? gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) : '';
+
+                    // Try to get unmasked vendor/renderer from debug extension
+                    let unmaskedVendor = '';
+                    let unmaskedRenderer = '';
+
+                    if (debugInfo) {
+                        unmaskedVendor = gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL) || '';
+                        unmaskedRenderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) || '';
+                    }
+
+                    // Fallback to basic WebGL params if debug info not available
+                    if (!unmaskedVendor) {
+                        unmaskedVendor = gl.getParameter(gl.VENDOR) || '';
+                    }
+                    if (!unmaskedRenderer) {
+                        unmaskedRenderer = gl.getParameter(gl.RENDERER) || '';
+                    }
+
+                    fingerprint.webgl_vendor = unmaskedVendor;
+                    fingerprint.webgl_renderer = unmaskedRenderer;
 
                     // WebGL properties
                     fingerprint.webgl_properties = {
@@ -215,8 +233,8 @@
                         vendor: gl.getParameter(gl.VENDOR),
                         renderer: gl.getParameter(gl.RENDERER),
                         shadingLanguageVersion: gl.getParameter(gl.SHADING_LANGUAGE_VERSION),
-                        unmaskedVendor: fingerprint.webgl_vendor,
-                        unmaskedRenderer: fingerprint.webgl_renderer,
+                        unmaskedVendor: unmaskedVendor,
+                        unmaskedRenderer: unmaskedRenderer,
                         maxTextureSize: gl.getParameter(gl.MAX_TEXTURE_SIZE),
                         maxViewportDims: [
                             gl.getParameter(gl.MAX_VIEWPORT_DIMS)[0],
@@ -235,6 +253,12 @@
                     gl.clearColor(0.5, 0.5, 0.5, 1);
                     gl.clear(gl.COLOR_BUFFER_BIT);
                     fingerprint.webgl = canvas.toDataURL();
+                } else {
+                    // No WebGL support
+                    fingerprint.webgl_vendor = '';
+                    fingerprint.webgl_renderer = '';
+                    fingerprint.webgl_properties = {};
+                    fingerprint.webgl = '';
                 }
                 updateProgress(5, 'WebGL collected');
 
