@@ -93,6 +93,53 @@
             font-size: 12px;
             max-height: 300px;
         }
+        .validation-result {
+            margin-top: 20px;
+            padding: 20px;
+            border-radius: 10px;
+            border: 2px solid #dee2e6;
+        }
+        .validation-result.pass {
+            background: #d4edda;
+            border-color: #28a745;
+        }
+        .validation-result.fail {
+            background: #f8d7da;
+            border-color: #dc3545;
+        }
+        .score-badge {
+            display: inline-block;
+            font-size: 48px;
+            font-weight: bold;
+            padding: 20px;
+            border-radius: 10px;
+            margin: 10px 0;
+        }
+        .score-badge.pass {
+            color: #28a745;
+            background: #d4edda;
+        }
+        .score-badge.fail {
+            color: #dc3545;
+            background: #f8d7da;
+        }
+        .issues-list {
+            margin-top: 15px;
+        }
+        .issue-item {
+            padding: 8px 12px;
+            margin: 5px 0;
+            border-radius: 5px;
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+        }
+        .fix-item {
+            padding: 8px 12px;
+            margin: 5px 0;
+            border-radius: 5px;
+            background: #d1ecf1;
+            border-left: 4px solid #17a2b8;
+        }
     </style>
 </head>
 <body>
@@ -127,8 +174,13 @@
             • Hardware info (CPU cores, RAM)
         </div>
 
+        <div id="validation-section" style="display:none;">
+            <h3>📊 Анализ Fingerprint</h3>
+            <div id="validation-result"></div>
+        </div>
+
         <div id="preview" style="display:none; margin-top: 20px;">
-            <h3>Preview:</h3>
+            <h3>📄 JSON Preview:</h3>
             <pre id="json-preview"></pre>
         </div>
     </div>
@@ -150,6 +202,138 @@
             const statusEl = document.getElementById('status');
             statusEl.textContent = message;
             statusEl.className = 'status ' + (isReady ? 'ready' : 'collecting');
+        }
+
+        // Simple fingerprint validator
+        function validateFingerprint(fp) {
+            const issues = [];
+            let score = 100;
+            const ua = fp.ua || '';
+            const isAndroid = /Android/i.test(ua);
+            const isMobile = /Mobile/i.test(ua);
+
+            // Check basic fields
+            if (!ua) { issues.push('❌ UA отсутствует'); score -= 30; }
+            if (!fp.canvas || fp.canvas.length === 0) { issues.push('⚠️ Canvas hash отсутствует'); score -= 10; }
+            if (!fp.webgl || fp.webgl.length === 0) { issues.push('⚠️ WebGL hash отсутствует'); score -= 10; }
+
+            // Check screen
+            if (!fp.attr || !fp.attr.screen || !fp.attr.screen.width) {
+                issues.push('❌ Screen размер отсутствует');
+                score -= 15;
+            }
+
+            // Check GPU
+            if (!fp.webgl_renderer || fp.webgl_renderer === '') {
+                issues.push('⚠️ GPU renderer не определён');
+                score -= 20;
+            }
+
+            // Android specific checks
+            if (isAndroid) {
+                const platform = (fp.attr?.navigator?.platform || '').toLowerCase();
+
+                // Platform check (accept armv81 and armv8l)
+                if (platform && !/linux\s+armv8[1l]|aarch64|arm64/.test(platform)) {
+                    issues.push(`⚠️ Platform необычный для Android: ${fp.attr.navigator.platform}`);
+                    score -= 8;
+                }
+
+                // Mobile token
+                if (!isMobile) {
+                    issues.push('❌ Android UA без Mobile токена');
+                    score -= 8;
+                }
+
+                // CSS pointer/hover
+                if (fp.css?.pointer !== 'coarse' || fp.css?.hover !== 'none') {
+                    issues.push('⚠️ CSS pointer/hover выглядит как desktop');
+                    score -= 5;
+                }
+
+                // GPU check
+                const gpuVendor = fp.webgl_vendor || '';
+                const gpuRenderer = fp.webgl_renderer || '';
+                const isMobileGPU = /Adreno|Mali|PowerVR|Apple/i.test(gpuRenderer) || /Qualcomm|ARM|Imagination/i.test(gpuVendor);
+
+                if (gpuRenderer && !isMobileGPU) {
+                    issues.push('⚠️ Mobile UA но desktop GPU');
+                    score -= 10;
+                }
+
+                // Generic UA check
+                if (/Android\s+\d+;\s+K\b/i.test(ua)) {
+                    issues.push('⚠️ Generic UA: "Android X; K" placeholder вместо модели устройства');
+                    score -= 12;
+                }
+
+                // Battery API check (Chrome 140+)
+                const chromeMatch = ua.match(/Chrome\/(\d+)/i);
+                const chromeVersion = chromeMatch ? parseInt(chromeMatch[1], 10) : 0;
+                if (fp.has_battery_api === true && chromeVersion >= 140) {
+                    issues.push('⚠️ Battery API на Chrome 140+ (должен быть удалён)');
+                    score -= 4;
+                }
+            }
+
+            // Desktop fonts on Android
+            if (isAndroid && fp.fonts) {
+                const desktopFonts = ['Times New Roman', 'Arial', 'Georgia', 'Verdana', 'Tahoma'];
+                const foundDesktopFonts = fp.fonts.filter(f => desktopFonts.includes(f));
+                if (foundDesktopFonts.length > 0) {
+                    issues.push(`⚠️ Desktop шрифты на Android: ${foundDesktopFonts.join(', ')}`);
+                    score -= 8;
+                }
+            }
+
+            const isValid = score >= 70;
+            return {
+                score: Math.max(0, score),
+                issues: issues,
+                isValid: isValid,
+                platform: isAndroid ? 'Android' : 'Desktop'
+            };
+        }
+
+        function displayValidationResult(result) {
+            const section = document.getElementById('validation-section');
+            const resultDiv = document.getElementById('validation-result');
+
+            const scoreClass = result.isValid ? 'pass' : 'fail';
+            const statusText = result.isValid ? '✅ PASS' : '❌ FAIL';
+
+            let html = `
+                <div class="validation-result ${scoreClass}">
+                    <div style="text-align: center;">
+                        <div class="score-badge ${scoreClass}">${result.score} / 100</div>
+                        <h3>${statusText}</h3>
+                        <p><strong>Platform:</strong> ${result.platform}</p>
+                    </div>
+            `;
+
+            if (result.issues.length > 0) {
+                html += '<div class="issues-list"><h4>🔍 Найденные проблемы:</h4>';
+                result.issues.forEach(issue => {
+                    html += `<div class="issue-item">${issue}</div>`;
+                });
+                html += '</div>';
+            } else {
+                html += '<p style="text-align: center; font-size: 18px;">🎉 Проблем не найдено!</p>';
+            }
+
+            if (!result.isValid) {
+                html += `
+                    <div style="margin-top: 15px; padding: 10px; background: #fff3cd; border-radius: 5px;">
+                        <strong>💡 Рекомендация:</strong> Для прохождения валидации требуется score ≥ 70.
+                        Исправьте найденные проблемы выше.
+                    </div>
+                `;
+            }
+
+            html += '</div>';
+
+            resultDiv.innerHTML = html;
+            section.style.display = 'block';
         }
 
         async function collectFingerprint() {
@@ -457,6 +641,10 @@
                 updateStatus('✅ Сбор завершен! Fingerprint готов', true);
                 document.getElementById('download-btn').disabled = false;
                 document.getElementById('copy-btn').disabled = false;
+
+                // Validate fingerprint
+                const validationResult = validateFingerprint(fingerprint);
+                displayValidationResult(validationResult);
 
                 // Show preview
                 document.getElementById('preview').style.display = 'block';
