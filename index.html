@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fingerprint Collector</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        .status {
+            text-align: center;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+        .status.collecting {
+            background: #fff3cd;
+            color: #856404;
+        }
+        .status.ready {
+            background: #d4edda;
+            color: #155724;
+        }
+        .progress {
+            width: 100%;
+            height: 30px;
+            background: #e9ecef;
+            border-radius: 5px;
+            overflow: hidden;
+            margin: 20px 0;
+        }
+        .progress-bar {
+            height: 100%;
+            background: #28a745;
+            transition: width 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+        }
+        button {
+            width: 100%;
+            padding: 15px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        button:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+        }
+        .info {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 20px;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+        .info strong {
+            color: #007bff;
+        }
+        pre {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+            font-size: 12px;
+            max-height: 300px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 Fingerprint Collector</h1>
+
+        <div id="status" class="status collecting">
+            Сбор данных...
+        </div>
+
+        <div class="progress">
+            <div id="progress-bar" class="progress-bar" style="width: 0%">0%</div>
+        </div>
+
+        <button id="download-btn" disabled>📥 Скачать JSON</button>
+        <button id="copy-btn" disabled>📋 Копировать JSON</button>
+
+        <div class="info">
+            <strong>Что собирается:</strong><br>
+            • User Agent, Platform, Languages<br>
+            • Screen resolution & available size<br>
+            • Canvas fingerprint (image + hash)<br>
+            • WebGL fingerprint (vendor, renderer, properties)<br>
+            • Fonts list & font_data2<br>
+            • AudioContext fingerprint<br>
+            • Timezone, Cookies, DoNotTrack<br>
+            • Media Devices (camera, mic, speakers)<br>
+            • Speech Synthesis voices<br>
+            • Sensors (if available)<br>
+            • Battery API (if available)<br>
+            • WebRTC local IP<br>
+            • Hardware info (CPU cores, RAM)
+        </div>
+
+        <div id="preview" style="display:none; margin-top: 20px;">
+            <h3>Preview:</h3>
+            <pre id="json-preview"></pre>
+        </div>
+    </div>
+
+    <script>
+        let fingerprint = {};
+        let progress = 0;
+        const totalSteps = 15;
+
+        function updateProgress(step, message) {
+            progress++;
+            const percent = Math.round((progress / totalSteps) * 100);
+            document.getElementById('progress-bar').style.width = percent + '%';
+            document.getElementById('progress-bar').textContent = percent + '%';
+            console.log(`[${progress}/${totalSteps}] ${message}`);
+        }
+
+        function updateStatus(message, isReady) {
+            const statusEl = document.getElementById('status');
+            statusEl.textContent = message;
+            statusEl.className = 'status ' + (isReady ? 'ready' : 'collecting');
+        }
+
+        async function collectFingerprint() {
+            try {
+                // 1. Navigator data
+                fingerprint.ua = navigator.userAgent;
+                fingerprint.platform = navigator.platform;
+                fingerprint.lang = navigator.language;
+                fingerprint.languages = navigator.languages ? navigator.languages.join(',') : navigator.language;
+                fingerprint.doNotTrack = navigator.doNotTrack;
+                fingerprint.cookieEnabled = navigator.cookieEnabled;
+                fingerprint.hardwareConcurrency = navigator.hardwareConcurrency || null;
+                fingerprint.deviceMemory = navigator.deviceMemory || null;
+                fingerprint.maxTouchPoints = navigator.maxTouchPoints || 0;
+                updateProgress(1, 'Navigator data collected');
+
+                // 2. Screen data
+                fingerprint.screen = {
+                    width: screen.width,
+                    height: screen.height,
+                    availWidth: screen.availWidth,
+                    availHeight: screen.availHeight,
+                    colorDepth: screen.colorDepth,
+                    pixelDepth: screen.pixelDepth
+                };
+                fingerprint.devicePixelRatio = window.devicePixelRatio || 1;
+                updateProgress(2, 'Screen data collected');
+
+                // 3. Timezone
+                fingerprint.timezone = new Date().getTimezoneOffset();
+                fingerprint.timezoneString = Intl.DateTimeFormat().resolvedOptions().timeZone;
+                updateProgress(3, 'Timezone collected');
+
+                // 4. Canvas fingerprint
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                canvas.width = 400;
+                canvas.height = 60;
+
+                ctx.textBaseline = 'top';
+                ctx.font = '14px Arial';
+                ctx.textBaseline = 'alphabetic';
+                ctx.fillStyle = '#f60';
+                ctx.fillRect(125, 1, 62, 20);
+                ctx.fillStyle = '#069';
+                ctx.fillText('Canvas fingerprint test 🔍', 2, 15);
+                ctx.fillStyle = 'rgba(102, 204, 0, 0.7)';
+                ctx.fillText('Canvas fingerprint test 🔍', 4, 17);
+
+                fingerprint.canvas = canvas.toDataURL();
+                updateProgress(4, 'Canvas collected');
+
+                // 5. WebGL fingerprint
+                const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+                if (gl) {
+                    const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+                    fingerprint.webgl_vendor = debugInfo ? gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL) : '';
+                    fingerprint.webgl_renderer = debugInfo ? gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) : '';
+
+                    // WebGL properties
+                    fingerprint.webgl_properties = {
+                        version: gl.getParameter(gl.VERSION),
+                        vendor: gl.getParameter(gl.VENDOR),
+                        renderer: gl.getParameter(gl.RENDERER),
+                        shadingLanguageVersion: gl.getParameter(gl.SHADING_LANGUAGE_VERSION),
+                        unmaskedVendor: fingerprint.webgl_vendor,
+                        unmaskedRenderer: fingerprint.webgl_renderer,
+                        maxTextureSize: gl.getParameter(gl.MAX_TEXTURE_SIZE),
+                        maxViewportDims: [
+                            gl.getParameter(gl.MAX_VIEWPORT_DIMS)[0],
+                            gl.getParameter(gl.MAX_VIEWPORT_DIMS)[1]
+                        ],
+                        maxRenderbufferSize: gl.getParameter(gl.MAX_RENDERBUFFER_SIZE),
+                        maxVertexAttribs: gl.getParameter(gl.MAX_VERTEX_ATTRIBS),
+                        maxVertexUniformVectors: gl.getParameter(gl.MAX_VERTEX_UNIFORM_VECTORS),
+                        maxFragmentUniformVectors: gl.getParameter(gl.MAX_FRAGMENT_UNIFORM_VECTORS),
+                        maxVaryingVectors: gl.getParameter(gl.MAX_VARYING_VECTORS)
+                    };
+
+                    // WebGL hash
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    gl.viewport(0, 0, canvas.width, canvas.height);
+                    gl.clearColor(0.5, 0.5, 0.5, 1);
+                    gl.clear(gl.COLOR_BUFFER_BIT);
+                    fingerprint.webgl = canvas.toDataURL();
+                }
+                updateProgress(5, 'WebGL collected');
+
+                // 6. Fonts
+                const baseFonts = ['monospace', 'sans-serif', 'serif'];
+                const testString = 'mmmmmmmmmmlli';
+                const testSize = '72px';
+                const h = document.getElementsByTagName('body')[0];
+                const s = document.createElement('span');
+                s.style.fontSize = testSize;
+                s.style.position = 'absolute';
+                s.style.left = '-9999px';
+                s.innerHTML = testString;
+                const defaultWidth = {};
+                const defaultHeight = {};
+
+                for (const baseFont of baseFonts) {
+                    s.style.fontFamily = baseFont;
+                    h.appendChild(s);
+                    defaultWidth[baseFont] = s.offsetWidth;
+                    defaultHeight[baseFont] = s.offsetHeight;
+                    h.removeChild(s);
+                }
+
+                const fontList = [
+                    'Arial', 'Arial Black', 'Arial Narrow', 'Arial Rounded MT Bold',
+                    'Calibri', 'Cambria', 'Cambria Math', 'Comic Sans MS', 'Consolas',
+                    'Courier', 'Courier New', 'Georgia', 'Helvetica', 'Helvetica Neue',
+                    'Impact', 'Lucida Console', 'Lucida Sans Unicode', 'Microsoft Sans Serif',
+                    'Palatino', 'Palatino Linotype', 'Segoe Print', 'Segoe Script',
+                    'Segoe UI', 'Tahoma', 'Times', 'Times New Roman', 'Trebuchet MS',
+                    'Verdana', 'Monaco', 'Roboto', 'Noto Sans', 'Noto Serif',
+                    'Noto Color Emoji', 'Droid Sans', 'Droid Serif'
+                ];
+
+                const detectedFonts = [];
+                const font_data2 = {};
+
+                for (const font of fontList) {
+                    let detected = false;
+                    for (const baseFont of baseFonts) {
+                        s.style.fontFamily = `'${font}',${baseFont}`;
+                        h.appendChild(s);
+                        const matched = (s.offsetWidth !== defaultWidth[baseFont] || s.offsetHeight !== defaultHeight[baseFont]);
+                        h.removeChild(s);
+                        detected = detected || matched;
+                    }
+                    if (detected) {
+                        detectedFonts.push(font);
+                        font_data2[font] = true;
+                    }
+                }
+
+                fingerprint.fonts = detectedFonts;
+                fingerprint.font_data2 = font_data2;
+                updateProgress(6, `Fonts collected: ${detectedFonts.length} fonts`);
+
+                // 7. Plugins
+                fingerprint.plugins = [];
+                for (let i = 0; i < navigator.plugins.length; i++) {
+                    const plugin = navigator.plugins[i];
+                    fingerprint.plugins.push({
+                        name: plugin.name,
+                        description: plugin.description,
+                        filename: plugin.filename
+                    });
+                }
+                updateProgress(7, 'Plugins collected');
+
+                // 8. Media Devices
+                if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
+                    try {
+                        const devices = await navigator.mediaDevices.enumerateDevices();
+                        fingerprint.media_devices = {
+                            audioinput: devices.filter(d => d.kind === 'audioinput').length,
+                            audiooutput: devices.filter(d => d.kind === 'audiooutput').length,
+                            videoinput: devices.filter(d => d.kind === 'videoinput').length
+                        };
+                    } catch (e) {
+                        fingerprint.media_devices = { audioinput: 0, audiooutput: 0, videoinput: 0 };
+                    }
+                } else {
+                    fingerprint.media_devices = { audioinput: 0, audiooutput: 0, videoinput: 0 };
+                }
+                updateProgress(8, 'Media devices collected');
+
+                // 9. Speech Synthesis
+                if (window.speechSynthesis) {
+                    const voices = speechSynthesis.getVoices();
+                    fingerprint.speech = voices.map(v => ({
+                        name: v.name,
+                        lang: v.lang,
+                        default: v.default,
+                        localService: v.localService,
+                        voiceURI: v.voiceURI
+                    }));
+                } else {
+                    fingerprint.speech = [];
+                }
+                updateProgress(9, `Speech voices collected: ${fingerprint.speech.length}`);
+
+                // 10. Battery API
+                if (navigator.getBattery) {
+                    try {
+                        const battery = await navigator.getBattery();
+                        fingerprint.has_battery_api = true;
+                        fingerprint.battery = {
+                            charging: battery.charging,
+                            level: battery.level
+                        };
+                    } catch (e) {
+                        fingerprint.has_battery_api = false;
+                    }
+                } else {
+                    fingerprint.has_battery_api = false;
+                }
+                updateProgress(10, 'Battery API checked');
+
+                // 11. Sensors (Accelerometer, Gyroscope)
+                fingerprint.sensor = {};
+                if (typeof Accelerometer !== 'undefined') {
+                    fingerprint.sensor.accelerometer = true;
+                }
+                if (typeof Gyroscope !== 'undefined') {
+                    fingerprint.sensor.gyroscope = true;
+                }
+                if (typeof Magnetometer !== 'undefined') {
+                    fingerprint.sensor.magnetometer = true;
+                }
+                updateProgress(11, 'Sensors checked');
+
+                // 12. Orientation
+                fingerprint.orientation = {
+                    angle: screen.orientation ? screen.orientation.angle : 0,
+                    type: screen.orientation ? screen.orientation.type : 'unknown'
+                };
+                updateProgress(12, 'Orientation collected');
+
+                // 13. WebRTC local IP
+                fingerprint.webrtc_leak = '';
+                try {
+                    const pc = new RTCPeerConnection({iceServers: []});
+                    pc.createDataChannel('');
+                    const offer = await pc.createOffer();
+                    await pc.setLocalDescription(offer);
+
+                    pc.onicecandidate = (ice) => {
+                        if (!ice || !ice.candidate || !ice.candidate.candidate) return;
+                        const match = /([0-9]{1,3}\.){3}[0-9]{1,3}/.exec(ice.candidate.candidate);
+                        if (match) {
+                            fingerprint.webrtc_leak = match[0];
+                        }
+                        pc.close();
+                    };
+                } catch (e) {
+                    fingerprint.webrtc_leak = '';
+                }
+                updateProgress(13, 'WebRTC checked');
+
+                // 14. CSS media queries
+                fingerprint.css = {
+                    pointer: matchMedia('(pointer: coarse)').matches ? 'coarse' :
+                             matchMedia('(pointer: fine)').matches ? 'fine' : 'none',
+                    hover: matchMedia('(hover: hover)').matches ? 'hover' :
+                           matchMedia('(hover: none)').matches ? 'none' : 'unknown'
+                };
+                updateProgress(14, 'CSS media queries collected');
+
+                // 15. Additional attributes
+                fingerprint.attr = {
+                    navigator: {
+                        userAgent: navigator.userAgent,
+                        platform: navigator.platform,
+                        language: navigator.language,
+                        hardwareConcurrency: navigator.hardwareConcurrency || null,
+                        deviceMemory: navigator.deviceMemory || null,
+                        maxTouchPoints: navigator.maxTouchPoints || 0
+                    },
+                    screen: fingerprint.screen
+                };
+                updateProgress(15, 'Additional attributes collected');
+
+                // Done!
+                updateStatus('✅ Сбор завершен! Fingerprint готов', true);
+                document.getElementById('download-btn').disabled = false;
+                document.getElementById('copy-btn').disabled = false;
+
+                // Show preview
+                document.getElementById('preview').style.display = 'block';
+                document.getElementById('json-preview').textContent = JSON.stringify(fingerprint, null, 2);
+
+            } catch (error) {
+                updateStatus('❌ Ошибка: ' + error.message, false);
+                console.error('Error collecting fingerprint:', error);
+            }
+        }
+
+        // Download JSON
+        document.getElementById('download-btn').addEventListener('click', () => {
+            const json = JSON.stringify(fingerprint, null, 2);
+            const blob = new Blob([json], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `fingerprint-${Date.now()}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+        });
+
+        // Copy JSON
+        document.getElementById('copy-btn').addEventListener('click', () => {
+            const json = JSON.stringify(fingerprint, null, 2);
+            navigator.clipboard.writeText(json).then(() => {
+                alert('✅ JSON скопирован в буфер обмена!');
+            }).catch(err => {
+                alert('❌ Ошибка копирования: ' + err);
+            });
+        });
+
+        // Start collection on load
+        window.addEventListener('load', () => {
+            // Wait for speech voices to load
+            if (window.speechSynthesis) {
+                speechSynthesis.onvoiceschanged = () => {
+                    setTimeout(collectFingerprint, 100);
+                };
+                // Fallback if onvoiceschanged doesn't fire
+                setTimeout(collectFingerprint, 1000);
+            } else {
+                collectFingerprint();
+            }
+        });
+    </script>
+</body>
+</html>
